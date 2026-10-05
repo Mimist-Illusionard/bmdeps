@@ -79,6 +79,21 @@ func ParsePOM(data []byte) (PomInfo, error) {
 	return info, nil
 }
 
+// ParseEngBEVersion reads only the platform dependency marker from a BM pom.xml.
+// BM Maven dependencies are deliberately not used for BM-to-BM compatibility;
+// only <engbe.version> is taken from the BM pom.
+func ParseEngBEVersion(data []byte) (string, error) {
+	var p pomXML
+	if err := xml.Unmarshal(data, &p); err != nil {
+		return "", fmt.Errorf("parse BM pom.xml: %w", err)
+	}
+	v := resolveProperties(strings.TrimSpace(p.Properties["engbe.version"]), p.Properties)
+	if strings.Contains(v, "${") {
+		return "", fmt.Errorf("engbe.version could not be resolved: %s", v)
+	}
+	return normalizeVersion(v), nil
+}
+
 var propertyRefRE = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 func resolveProperties(value string, props map[string]string) string {

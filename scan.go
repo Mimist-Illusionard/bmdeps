@@ -26,8 +26,26 @@ type scanResult struct {
 func ScanGitLab(ctx context.Context, cfg Config, limit int) (Catalog, error) {
 	client := NewGitLabClient(cfg.GitLabURL, cfg.GitLabToken, cfg.HTTPTimeout)
 
-	var jobsList []scanJob
+	var platformReleases []PlatformRelease
 	var listErrors []ScanError
+	if cfg.EngBEProject != "" {
+		tags, err := client.ListTags(ctx, cfg.EngBEProject)
+		if err != nil {
+			listErrors = append(listErrors, ScanError{Project: cfg.EngBEProject, Error: "scan platform tags: " + err.Error()})
+		} else {
+			for _, tag := range tags {
+				if cfg.TagRegex.MatchString(tag.Name) {
+					platformReleases = append(platformReleases, PlatformRelease{
+						Project: cfg.EngBEProject,
+						Tag:     tag.Name,
+						Release: normalizeVersion(tag.Name),
+					})
+				}
+			}
+		}
+	}
+
+	var jobsList []scanJob
 	for _, project := range cfg.Projects {
 		tags, err := client.ListTags(ctx, project)
 		if err != nil {
@@ -42,7 +60,7 @@ func ScanGitLab(ctx context.Context, cfg Config, limit int) (Catalog, error) {
 			}
 		}
 		// GitLab does not have to return semantic versions in semantic order.
-		// Sort locally so --limit means newest release versions.
+		// Sort locally so --limit means newest BM release versions.
 		sort.Slice(matching, func(i, j int) bool {
 			return versionLess(matching[j], matching[i])
 		})
@@ -55,7 +73,10 @@ func ScanGitLab(ctx context.Context, cfg Config, limit int) (Catalog, error) {
 	}
 
 	if len(jobsList) == 0 {
-		return NewCatalog(nil, listErrors), fmt.Errorf("no matching release tags found")
+		c := NewCatalog(nil, listErrors)
+		c.PlatformReleases = platformReleases
+		c.sort()
+		return c, fmt.Errorf("no matching BM release tags found")
 	}
 
 	jobs := make(chan scanJob)
@@ -96,7 +117,10 @@ func ScanGitLab(ctx context.Context, cfg Config, limit int) (Catalog, error) {
 		releases = append(releases, result.Release)
 	}
 
-	return NewCatalog(releases, errors), nil
+	c := NewCatalog(releases, errors)
+	c.PlatformReleases = platformReleases
+	c.sort()
+	return c, nil
 }
 
 func analyzeRelease(ctx context.Context, reader rawFileReader, dataModelPath, project, tag string) (Release, error) {
@@ -134,12 +158,23 @@ func analyzeRelease(ctx context.Context, reader rawFileReader, dataModelPath, pr
 		return Release{}, fmt.Errorf("%s: assert-module-version not found", selectedInstaller)
 	}
 
+	// BM-to-BM compatibility still comes only from EDS. The one Maven value we
+	// intentionally read from a BM tag is <engbe.version>, because it describes
+	// the platform backend release this exact BM release was built against.
+	var engBEVersion string
+	if pomData, pomErr := reader.RawFile(ctx, project, tag, "pom.xml"); pomErr == nil {
+		if parsed, parseErr := ParseEngBEVersion(pomData); parseErr == nil {
+			engBEVersion = parsed
+		}
+	}
+
 	return Release{
 		Project:       project,
 		Tag:           tag,
 		Release:       normalizeVersion(tag),
 		Module:        normalizeModule(info.Module),
 		DBVersion:     info.ModuleVersion,
+		EngBEVersion:  engBEVersion,
 		InstallerPath: selectedInstaller,
 		Dependencies:  info.Dependencies,
 	}, nil

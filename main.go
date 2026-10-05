@@ -69,6 +69,7 @@ func runList(args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	catalogPath := fs.String("catalog", "./out/catalog.json", "path to catalog.json")
 	module := fs.String("module", "", "optional EDS module filter, for example glo")
+	platform := fs.Bool("platform", false, "list scanned cs-eng-be platform releases")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -76,7 +77,11 @@ func runList(args []string) error {
 	if err != nil {
 		return err
 	}
-	PrintCatalog(catalog, *module)
+	if *platform {
+		PrintPlatformCatalog(catalog)
+	} else {
+		PrintCatalog(catalog, *module)
+	}
 	return nil
 }
 
@@ -125,18 +130,20 @@ func usage() {
 
 Usage:
   bmdeps scan  --env ./bmdeps.env --out ./out [--limit 20]
-  bmdeps list  --catalog ./out/catalog.json [--module glo]
+  bmdeps list  --catalog ./out/catalog.json [--module glo] [--platform]
   bmdeps check --catalog ./out/catalog.json --pom ./stand_pom.xml [--report ./report.json]
 
 Commands:
   scan   For every configured BM project/tag, read dataModel install.eds files.
          The Git tag is the BM release. EDS gives the DB version and DB dependencies.
-         BM pom.xml files are intentionally NOT used for compatibility.
+         BM pom.xml files are used only to read <engbe.version>; BM-to-BM compatibility still comes only from EDS.
 
-  list   Show release -> DB mappings discovered from Git tags + EDS.
+  list   Show release -> DB mappings and engbe requirements; --platform lists cs-eng-be tags.
 
   check  Read the builder/stand pom.xml, resolve selected cs-* release versions,
-         translate them through catalog.json to DB versions, then compare them with
-         assert-dependency requirements from EDS. Exit code 2 means incompatible.
+         translate them through catalog.json to DB versions, then compare only EDS
+         relations whose source and target BM are both present in that POM.
+         EDS dependencies to modules absent from the POM are ignored for this stand.
+         Exit code 2 means incompatible.
 `)
 }

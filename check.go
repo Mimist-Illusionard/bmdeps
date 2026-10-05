@@ -14,17 +14,21 @@ const (
 	CheckMissingRelease = "missing-release"
 	CheckUnknownModule  = "unknown-module"
 	CheckAmbiguous      = "ambiguous-release"
+	CheckNotDeclared    = "not-declared"
+	CheckNotScanned     = "not-scanned"
 )
 
 type SelectedModule struct {
-	Module     string   `json:"module"`
-	ArtifactID string   `json:"artifact_id"`
-	Release    string   `json:"release"`
-	DBVersion  int      `json:"db_version,omitempty"`
-	Status     string   `json:"status"`
-	Project    string   `json:"project,omitempty"`
-	Tag        string   `json:"tag,omitempty"`
-	Candidates []string `json:"candidates,omitempty"`
+	Module       string   `json:"module"`
+	ArtifactID   string   `json:"artifact_id"`
+	Release      string   `json:"release"`
+	DBVersion    int      `json:"db_version,omitempty"`
+	EngBEVersion string   `json:"engbe_version,omitempty"`
+	EngBEStatus  string   `json:"engbe_status,omitempty"`
+	Status       string   `json:"status"`
+	Project      string   `json:"project,omitempty"`
+	Tag          string   `json:"tag,omitempty"`
+	Candidates   []string `json:"candidates,omitempty"`
 }
 
 type DependencyCheck struct {
@@ -38,6 +42,14 @@ type DependencyCheck struct {
 	Status            string   `json:"status"`
 	Compatible        []string `json:"compatible_releases,omitempty"`
 	Detail            string   `json:"detail,omitempty"`
+}
+
+type PlatformCheck struct {
+	SourceModule  string `json:"source_module"`
+	SourceRelease string `json:"source_release"`
+	RequiredEngBE string `json:"required_engbe,omitempty"`
+	Status        string `json:"status"`
+	Detail        string `json:"detail,omitempty"`
 }
 
 type RequirementConflict struct {
@@ -57,6 +69,7 @@ type StandReport struct {
 	Compatible      bool                  `json:"compatible"`
 	Selected        []SelectedModule      `json:"selected_modules"`
 	Checks          []DependencyCheck     `json:"dependency_checks"`
+	PlatformChecks  []PlatformCheck       `json:"platform_checks,omitempty"`
 	Conflicts       []RequirementConflict `json:"requirement_conflicts,omitempty"`
 	Warnings        []string              `json:"warnings,omitempty"`
 }
@@ -80,9 +93,6 @@ func CheckStand(c Catalog, pom PomInfo, artifactPrefix string) StandReport {
 	for _, dep := range pom.Dependencies {
 		module, known := aliases[strings.ToLower(dep.ArtifactID)]
 		if !known {
-			// The stand POM supplied for this project uses cs-* for BM artifacts.
-			// Call out a cs-* dependency missing from PROJECTS instead of silently
-			// pretending it was verified.
 			if strings.HasPrefix(strings.ToLower(dep.ArtifactID), strings.ToLower(artifactPrefix)) {
 				module = normalizeModule(strings.TrimPrefix(dep.ArtifactID, artifactPrefix))
 				sm := SelectedModule{
@@ -106,9 +116,21 @@ func CheckStand(c Catalog, pom PomInfo, artifactPrefix string) StandReport {
 			r := candidates[0]
 			sm.Status = CheckOK
 			sm.DBVersion = r.DBVersion
+			sm.EngBEVersion = r.EngBEVersion
 			sm.Project = r.Project
 			sm.Tag = r.Tag
 			selectedReleaseByModule[module] = r
+
+			switch {
+			case r.EngBEVersion == "":
+				sm.EngBEStatus = CheckNotDeclared
+			case len(c.PlatformReleases) == 0:
+				sm.EngBEStatus = CheckNotScanned
+			case c.hasPlatformRelease(r.EngBEVersion):
+				sm.EngBEStatus = CheckOK
+			default:
+				sm.EngBEStatus = CheckMissingRelease
+			}
 		default:
 			sm.Status = CheckAmbiguous
 			for _, r := range candidates {
@@ -120,12 +142,63 @@ func CheckStand(c Catalog, pom PomInfo, artifactPrefix string) StandReport {
 		selectedByModule[module] = sm
 	}
 
-	// Build dependency checks only from EDS. pom.xml of the BM projects is not
-	// involved: the stand POM merely selects releases.
+	// Platform dependency check: each resolved BM release contributes the
+	// engbe.version from its own pom.xml. We validate that this exact cs-eng-be
+	// release exists among the scanned tags of ENGBE_PROJECT. If a legacy
+	// catalog has neither platform tags nor engbe.version values, platform
+	// checking stays disabled so existing DB-only workflows remain unchanged.
+	platformFeatureEnabled := len(c.PlatformReleases) > 0
+	if !platformFeatureEnabled {
+		for _, r := range selectedReleaseByModule {
+			if r.EngBEVersion != "" {
+				platformFeatureEnabled = true
+				break
+			}
+		}
+	}
+	if platformFeatureEnabled {
+		for sourceModule, sourceRelease := range selectedReleaseByModule {
+			pc := PlatformCheck{
+				SourceModule:  sourceModule,
+				SourceRelease: sourceRelease.Release,
+				RequiredEngBE: sourceRelease.EngBEVersion,
+			}
+			switch {
+			case sourceRelease.EngBEVersion == "":
+				pc.Status = CheckNotDeclared
+				pc.Detail = "BM pom.xml does not declare engbe.version"
+				report.Warnings = append(report.Warnings, fmt.Sprintf("%s %s has no engbe.version", sourceModule, sourceRelease.Release))
+			case len(c.PlatformReleases) == 0:
+				pc.Status = CheckNotScanned
+				pc.Detail = "ENGBE_PROJECT was not scanned, so the platform release cannot be verified"
+				report.Warnings = append(report.Warnings, fmt.Sprintf("%s %s requires engbe %s, but platform tags were not scanned", sourceModule, sourceRelease.Release, sourceRelease.EngBEVersion))
+			case c.hasPlatformRelease(sourceRelease.EngBEVersion):
+				pc.Status = CheckOK
+			default:
+				pc.Status = CheckMissingRelease
+				pc.Detail = "required engbe.version is not present among scanned cs-eng-be tags"
+				report.Compatible = false
+			}
+			report.PlatformChecks = append(report.PlatformChecks, pc)
+		}
+	}
+
+	// Build BM-to-BM dependency checks only from EDS. BM pom.xml is used only
+	// for engbe.version, never for BM-to-BM compatibility.
 	for sourceModule, sourceRelease := range selectedReleaseByModule {
 		for _, dep := range sourceRelease.Dependencies {
 			targetModule := normalizeModule(dep.Module)
 			if isInternalDBDependency(sourceModule, targetModule) {
+				continue
+			}
+
+			// The stand/builder pom.xml defines the scope of compatibility checking.
+			// An EDS dependency on a BM that is not present in this pom is irrelevant
+			// for this particular stand and must not make the check fail. We still
+			// scan every release into the catalog so the same catalog can validate
+			// other stand POMs later.
+			targetSelected, selectedInStand := selectedByModule[targetModule]
+			if !selectedInStand {
 				continue
 			}
 
@@ -138,19 +211,6 @@ func CheckStand(c Catalog, pom PomInfo, artifactPrefix string) StandReport {
 			if !modules[targetModule] {
 				check.Status = CheckUnknownModule
 				check.Detail = "EDS dependency points to a module that is not present in the scanned catalog"
-				report.Checks = append(report.Checks, check)
-				report.Compatible = false
-				continue
-			}
-
-			targetSelected, exists := selectedByModule[targetModule]
-			if !exists {
-				check.Status = CheckMissingModule
-				check.Compatible = releaseNames(c.compatibleReleases(targetModule, dep.Version))
-				check.Detail = "required BM is not selected in the stand pom.xml"
-				if len(check.Compatible) == 0 {
-					check.Detail += fmt.Sprintf("; no scanned %s release provides DB >= %d", targetModule, dep.Version)
-				}
 				report.Checks = append(report.Checks, check)
 				report.Compatible = false
 				continue
@@ -174,8 +234,6 @@ func CheckStand(c Catalog, pom PomInfo, artifactPrefix string) StandReport {
 			case targetSelected.DBVersion == dep.Version:
 				check.Status = CheckOK
 			case targetSelected.DBVersion > dep.Version:
-				// assert-dependency is treated as a minimum DB requirement.
-				// A newer DB is allowed, but is shown as a warning.
 				check.Status = CheckWarning
 				check.Detail = fmt.Sprintf("selected release provides newer DB %d; minimum required DB is %d", targetSelected.DBVersion, dep.Version)
 				report.Warnings = append(report.Warnings, fmt.Sprintf(
@@ -195,11 +253,12 @@ func CheckStand(c Catalog, pom PomInfo, artifactPrefix string) StandReport {
 		}
 	}
 
-	// EDS DB requirements are lower bounds. If two modules require GLO 4700
-	// and GLO 4800, GLO 4800 satisfies both, so this is not a conflict.
 	report.Conflicts = nil
 
 	sort.Slice(report.Selected, func(i, j int) bool { return report.Selected[i].Module < report.Selected[j].Module })
+	sort.Slice(report.PlatformChecks, func(i, j int) bool {
+		return report.PlatformChecks[i].SourceModule < report.PlatformChecks[j].SourceModule
+	})
 	sort.Slice(report.Checks, func(i, j int) bool {
 		if report.Checks[i].SourceModule == report.Checks[j].SourceModule {
 			return report.Checks[i].TargetModule < report.Checks[j].TargetModule
@@ -233,8 +292,5 @@ func releaseNames(releases []Release) []string {
 }
 
 func findRequirementConflicts(checks []DependencyCheck) []RequirementConflict {
-	// Kept for compatibility with the report model. With minimum-version
-	// semantics, multiple requirements for one module collapse to the highest
-	// required DB version instead of conflicting.
 	return nil
 }

@@ -14,6 +14,7 @@ type Config struct {
 	GitLabURL     string
 	GitLabToken   string
 	Projects      []string
+	EngBEProject  string
 	TagRegex      *regexp.Regexp
 	DataModelPath string
 	Concurrency   int
@@ -41,6 +42,7 @@ func LoadConfig(path string) (Config, error) {
 		GitLabURL:     strings.TrimRight(get("GITLAB_URL", ""), "/"),
 		GitLabToken:   get("GITLAB_TOKEN", ""),
 		Projects:      splitCSV(get("PROJECTS", "")),
+		EngBEProject:  strings.TrimSpace(get("ENGBE_PROJECT", "")),
 		DataModelPath: strings.Trim(get("DATA_MODEL_PATH", "dataModel"), "/"),
 		Concurrency:   6,
 		HTTPTimeout:   20 * time.Second,

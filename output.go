@@ -57,7 +57,21 @@ func CatalogDOT(c Catalog) string {
 	sort.Slice(releases, func(i, j int) bool { return releaseID(releases[i]) < releaseID(releases[j]) })
 	for _, r := range releases {
 		label := fmt.Sprintf("%s\\nrelease %s\\nDB %d", dotEscape(r.Module), dotEscape(r.Release), r.DBVersion)
+		if r.EngBEVersion != "" {
+			label += fmt.Sprintf("\\nengbe %s", dotEscape(r.EngBEVersion))
+		}
 		b.WriteString(fmt.Sprintf("  \"%s\" [label=\"%s\"];\n", dotEscape(releaseID(r)), label))
+	}
+
+	for _, p := range c.PlatformReleases {
+		id := "engbe:" + p.Release
+		label := "cs-eng-be\\n" + p.Release
+		b.WriteString(fmt.Sprintf("  \"%s\" [shape=diamond,label=\"%s\"];\n", dotEscape(id), dotEscape(label)))
+	}
+	for _, r := range releases {
+		if r.EngBEVersion != "" && c.hasPlatformRelease(r.EngBEVersion) {
+			b.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"engbe\"];\n", dotEscape(releaseID(r)), dotEscape("engbe:"+r.EngBEVersion)))
+		}
 	}
 
 	constraintNodes := map[string]bool{}
@@ -96,7 +110,10 @@ func PrintScanSummary(c Catalog) {
 		projects[r.Project] = true
 		modules[r.Module] = true
 	}
-	fmt.Printf("Scanned releases: %d across %d projects / %d EDS modules\n", len(c.Releases), len(projects), len(modules))
+	fmt.Printf("Scanned BM releases: %d across %d projects / %d EDS modules\n", len(c.Releases), len(projects), len(modules))
+	if len(c.PlatformReleases) > 0 {
+		fmt.Printf("Scanned cs-eng-be releases: %d from %s\n", len(c.PlatformReleases), c.PlatformReleases[0].Project)
+	}
 	if len(c.Errors) > 0 {
 		fmt.Printf("Scan warnings/errors: %d (see catalog.json)\n", len(c.Errors))
 	}
@@ -108,7 +125,17 @@ func PrintCatalog(c Catalog, moduleFilter string) {
 		if moduleFilter != "" && normalizeModule(r.Module) != moduleFilter {
 			continue
 		}
-		fmt.Printf("%-12s %-14s DB %-8d tag=%-14s project=%s\n", r.Module, r.Release, r.DBVersion, r.Tag, r.Project)
+		engbe := "-"
+		if r.EngBEVersion != "" {
+			engbe = r.EngBEVersion
+		}
+		fmt.Printf("%-12s %-14s DB %-8d ENGBE %-12s tag=%-14s project=%s\n", r.Module, r.Release, r.DBVersion, engbe, r.Tag, r.Project)
+	}
+}
+
+func PrintPlatformCatalog(c Catalog) {
+	for _, r := range c.PlatformReleases {
+		fmt.Printf("cs-eng-be   %-14s tag=%-14s project=%s\n", r.Release, r.Tag, r.Project)
 	}
 }
 
@@ -119,15 +146,42 @@ func PrintStandReport(report StandReport) {
 	}
 	fmt.Printf("Checking %s %s\n\n", name, report.StandVersion)
 	fmt.Println("Selected BM releases")
-	fmt.Printf("%-12s %-14s %-10s %-18s\n", "MODULE", "RELEASE", "DB", "STATUS")
+	fmt.Printf("%-12s %-14s %-10s %-14s %-18s\n", "MODULE", "RELEASE", "DB", "ENGBE", "STATUS")
 	for _, s := range report.Selected {
 		db := "-"
 		if s.DBVersion != 0 {
 			db = fmt.Sprint(s.DBVersion)
 		}
-		fmt.Printf("%-12s %-14s %-10s %-18s\n", s.Module, s.Release, db, strings.ToUpper(s.Status))
+		engbe := "-"
+		if s.EngBEVersion != "" {
+			engbe = s.EngBEVersion
+		}
+		fmt.Printf("%-12s %-14s %-10s %-14s %-18s\n", s.Module, s.Release, db, engbe, strings.ToUpper(s.Status))
 		if s.Status == CheckUnknownModule {
 			fmt.Printf("  ! artifact %s is not represented by a project in the catalog\n", s.ArtifactID)
+		}
+	}
+
+	if len(report.PlatformChecks) > 0 {
+		fmt.Println("\nPlatform dependencies")
+		for _, c := range report.PlatformChecks {
+			mark := "✓"
+			switch c.Status {
+			case CheckWarning, CheckNotDeclared, CheckNotScanned:
+				mark = "!"
+			case CheckOK:
+				mark = "✓"
+			default:
+				mark = "✗"
+			}
+			if c.RequiredEngBE == "" {
+				fmt.Printf("%s %s %s -> engbe not declared  [%s]\n", mark, c.SourceModule, c.SourceRelease, strings.ToUpper(c.Status))
+			} else {
+				fmt.Printf("%s %s %s -> cs-eng-be %s  [%s]\n", mark, c.SourceModule, c.SourceRelease, c.RequiredEngBE, strings.ToUpper(c.Status))
+			}
+			if c.Detail != "" {
+				fmt.Printf("  %s\n", c.Detail)
+			}
 		}
 	}
 
@@ -156,16 +210,6 @@ func PrintStandReport(report StandReport) {
 			}
 			if len(c.Compatible) > 0 && c.Status != CheckOK && c.Status != CheckWarning {
 				fmt.Printf("  compatible %s releases for DB >= %d: %s\n", c.TargetModule, c.RequiredDBVersion, limitedJoin(c.Compatible, 10))
-			}
-		}
-	}
-
-	if len(report.Conflicts) > 0 {
-		fmt.Println("\nRequirement conflicts")
-		for _, conflict := range report.Conflicts {
-			fmt.Printf("✗ %s is required at more than one DB version:\n", conflict.TargetModule)
-			for _, req := range conflict.Requirements {
-				fmt.Printf("  %s %s -> DB %d\n", req.SourceModule, req.SourceRelease, req.DBVersion)
 			}
 		}
 	}

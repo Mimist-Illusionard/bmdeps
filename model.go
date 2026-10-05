@@ -8,16 +8,26 @@ import (
 	"time"
 )
 
-// Release is one BM Git tag correlated with the DB module version and DB
-// dependencies declared by the final active EDS installer on that tag.
+// Release is one BM Git tag correlated with its DB version, EDS DB
+// dependencies and the cs-eng-be release declared by this BM tag's pom.xml.
 type Release struct {
 	Project       string         `json:"project"`
 	Tag           string         `json:"tag"`
 	Release       string         `json:"release"`
 	Module        string         `json:"module"`
 	DBVersion     int            `json:"db_version"`
+	EngBEVersion  string         `json:"engbe_version,omitempty"`
 	InstallerPath string         `json:"installer_path"`
 	Dependencies  []DBDependency `json:"dependencies,omitempty"`
+}
+
+// PlatformRelease is an available release tag of the platform backend project.
+// No other platform repository is needed: BM pom.xml points directly to one of
+// these cs-eng-be releases through the engbe.version property.
+type PlatformRelease struct {
+	Project string `json:"project"`
+	Tag     string `json:"tag"`
+	Release string `json:"release"`
 }
 
 type ScanError struct {
@@ -27,9 +37,10 @@ type ScanError struct {
 }
 
 type Catalog struct {
-	GeneratedAt time.Time   `json:"generated_at"`
-	Releases    []Release   `json:"releases"`
-	Errors      []ScanError `json:"scan_errors,omitempty"`
+	GeneratedAt      time.Time         `json:"generated_at"`
+	Releases         []Release         `json:"releases"`
+	PlatformReleases []PlatformRelease `json:"platform_releases,omitempty"`
+	Errors           []ScanError       `json:"scan_errors,omitempty"`
 }
 
 func NewCatalog(releases []Release, scanErrors []ScanError) Catalog {
@@ -38,13 +49,20 @@ func NewCatalog(releases []Release, scanErrors []ScanError) Catalog {
 		Releases:    append([]Release(nil), releases...),
 		Errors:      append([]ScanError(nil), scanErrors...),
 	}
+	c.sort()
+	return c
+}
+
+func (c *Catalog) sort() {
 	sort.Slice(c.Releases, func(i, j int) bool {
 		if c.Releases[i].Module == c.Releases[j].Module {
 			return versionLess(c.Releases[j].Release, c.Releases[i].Release)
 		}
 		return c.Releases[i].Module < c.Releases[j].Module
 	})
-	return c
+	sort.Slice(c.PlatformReleases, func(i, j int) bool {
+		return versionLess(c.PlatformReleases[j].Release, c.PlatformReleases[i].Release)
+	})
 }
 
 func (c Catalog) modules() map[string]bool {
@@ -89,6 +107,16 @@ func (c Catalog) compatibleReleases(module string, dbVersion int) []Release {
 	}
 	sort.Slice(out, func(i, j int) bool { return versionLess(out[j].Release, out[i].Release) })
 	return out
+}
+
+func (c Catalog) hasPlatformRelease(release string) bool {
+	release = normalizeVersion(release)
+	for _, r := range c.PlatformReleases {
+		if normalizeVersion(r.Release) == release {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeModule(v string) string {

@@ -45,3 +45,18 @@ assert-module-version should-be 3710 module-name "dpd"
 		t.Fatalf("bad dependencies: %+v", r.Dependencies)
 	}
 }
+
+func TestAnalyzeReleaseAddsEngBEFromBMPOM(t *testing.T) {
+	files := fakeFiles{
+		"bm/cs-dpd@2.3.21:dataModel/install.eds":              `run /version.3700/install.eds`,
+		"bm/cs-dpd@2.3.21:dataModel/version.3700/install.eds": `assert-module-version should-be 3710 module-name "dpd"`,
+		"bm/cs-dpd@2.3.21:pom.xml":                            `<project><properties><engbe.version>2.38.1</engbe.version></properties></project>`,
+	}
+	r, err := analyzeRelease(context.Background(), files, "dataModel", "bm/cs-dpd", "2.3.21")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.EngBEVersion != "2.38.1" {
+		t.Fatalf("engbe=%q release=%+v", r.EngBEVersion, r)
+	}
+}

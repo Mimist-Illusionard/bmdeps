@@ -27,3 +27,19 @@ func TestParseStandPOMResolvesModuleProperties(t *testing.T) {
 		t.Fatalf("bad deps: %+v", got.Dependencies)
 	}
 }
+
+func TestParseEngBEVersion(t *testing.T) {
+	src := []byte(`<?xml version="1.0"?>
+<project>
+  <properties>
+    <engbe.version>2.38.1</engbe.version>
+  </properties>
+</project>`)
+	got, err := ParseEngBEVersion(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "2.38.1" {
+		t.Fatalf("got %q", got)
+	}
+}
