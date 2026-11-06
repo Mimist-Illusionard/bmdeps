@@ -10,7 +10,7 @@ BM project `pom.xml` files are intentionally not used to determine compatibility
 
 ## Features
 
-- scans configured BM repositories in GitLab;
+- scans BM repositories discovered in a GitLab group, including subgroups;
 - discovers BM releases from Git tags;
 - maps each BM release to its EDS DB version;
 - reads DB dependencies from `assert-dependency` declarations;
@@ -29,7 +29,7 @@ BM project `pom.xml` files are intentionally not used to determine compatibility
 
 ### 1. Build the release catalog
 
-For every configured BM project, `bmdeps scan`:
+For every BM project discovered in the configured GitLab group, `bmdeps scan`:
 
 1. reads Git tags matching `TAG_REGEX`;
 2. treats the Git tag as the BM release version;
@@ -141,8 +141,11 @@ GITLAB_URL=https://gitlab.example.com
 # Read-only token is enough for private projects
 GITLAB_TOKEN=glpat-CHANGE_ME
 
-# BM repositories to scan
-PROJECTS=CS-BM/cs-glo,CS-BM/cs-dms,CS-BM/cs-dpd,CS-BM/cs-ped,CS-BM/cs-cm,CS-BM/cs-rm,CS-BM/cs-start
+# Group whose projects are scanned; subgroups are included automatically
+GROUP_ID=36
+
+# Optional regexp filter on the full project path (path_with_namespace)
+PROJECT_REGEX=^CS-BM/
 
 # Release tags to scan
 TAG_REGEX=^v?[0-9]+\.[0-9]+\.[0-9]+$
@@ -159,6 +162,8 @@ Available configuration parameters:
 | `GITLAB_URL` | GitLab base URL without `/api/v4` | required |
 | `GITLAB_TOKEN` | GitLab token used to read tags and repository files | required |
 | `PROJECTS` | comma-separated list of BM GitLab projects | required |
+| `GROUP_ID` | GitLab group whose projects are scanned; subgroups are included | required |
+| `PROJECT_REGEX` | optional regexp matched against the full project path, e.g. `^CS-BM/` | empty (all projects) |
 | `TAG_REGEX` | regular expression for release tags | `^v?[0-9]+\.[0-9]+\.[0-9]+$` |
 | `DATA_MODEL_PATH` | path to the data model directory in a BM repository | `dataModel` |
 | `CONCURRENCY` | number of concurrent release scan workers | `6` |
@@ -188,7 +193,7 @@ To scan only the newest matching releases of each project:
 ./bmdeps scan --env ./bmdeps.env --out ./out --limit 20
 ```
 
-`--limit` is applied independently to every configured project. `0` means that all matching tags are scanned.
+`--limit` is applied independently to every scanned project. `0` means that all matching tags are scanned.
 
 The command creates:
 

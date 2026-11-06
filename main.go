@@ -56,7 +56,13 @@ func runScan(args []string) error {
 		return err
 	}
 
-	catalog, scanErr := ScanGitLab(context.Background(), cfg, *limit)
+	client := NewGitLabClient(cfg.GitLabURL, cfg.GitLabToken, cfg.HTTPTimeout)
+	projects, err := client.ListProjects(context.Background(), cfg.GroupID)
+	if err != nil {
+		return err
+	}
+
+	catalog, scanErr := ScanGitLab(context.Background(), client, cfg, projects, *limit)
 	if err := WriteCatalogFiles(catalog, *outDir); err != nil {
 		return err
 	}

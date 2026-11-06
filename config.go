@@ -13,7 +13,8 @@ import (
 type Config struct {
 	GitLabURL     string
 	GitLabToken   string
-	Projects      []string
+	GroupID       string
+	ProjectRegex  *regexp.Regexp
 	EngBEProject  string
 	TagRegex      *regexp.Regexp
 	DataModelPath string
@@ -27,7 +28,6 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, err
 	}
 
-	// Real environment variables override values from the file.
 	get := func(key, def string) string {
 		if v := os.Getenv(key); v != "" {
 			return v
@@ -41,7 +41,7 @@ func LoadConfig(path string) (Config, error) {
 	cfg := Config{
 		GitLabURL:     strings.TrimRight(get("GITLAB_URL", ""), "/"),
 		GitLabToken:   get("GITLAB_TOKEN", ""),
-		Projects:      splitCSV(get("PROJECTS", "")),
+		GroupID:       strings.TrimSpace(get("GROUP_ID", "")),
 		EngBEProject:  strings.TrimSpace(get("ENGBE_PROJECT", "")),
 		DataModelPath: strings.Trim(get("DATA_MODEL_PATH", "dataModel"), "/"),
 		Concurrency:   6,
@@ -54,8 +54,15 @@ func LoadConfig(path string) (Config, error) {
 	if cfg.GitLabToken == "" {
 		return Config{}, fmt.Errorf("GITLAB_TOKEN is required")
 	}
-	if len(cfg.Projects) == 0 {
-		return Config{}, fmt.Errorf("PROJECTS is required")
+	if cfg.GroupID == "" {
+		return Config{}, fmt.Errorf("GROUP_ID is required")
+	}
+
+	if pattern := strings.TrimSpace(get("PROJECT_REGEX", "")); pattern != "" {
+		cfg.ProjectRegex, err = regexp.Compile(pattern)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid PROJECT_REGEX: %w", err)
+		}
 	}
 
 	tagPattern := get("TAG_REGEX", `^v?[0-9]+\.[0-9]+\.[0-9]+$`)
@@ -116,15 +123,4 @@ func readEnvFile(path string) (map[string]string, error) {
 		return nil, err
 	}
 	return out, nil
-}
-
-func splitCSV(s string) []string {
-	var out []string
-	for _, part := range strings.Split(s, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
 }

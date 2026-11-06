@@ -23,9 +23,7 @@ type scanResult struct {
 	Job     scanJob
 }
 
-func ScanGitLab(ctx context.Context, cfg Config, limit int) (Catalog, error) {
-	client := NewGitLabClient(cfg.GitLabURL, cfg.GitLabToken, cfg.HTTPTimeout)
-
+func ScanGitLab(ctx context.Context, client *GitLabClient, cfg Config, projects []GitLabProject, limit int) (Catalog, error) {
 	var platformReleases []PlatformRelease
 	var listErrors []ScanError
 	if cfg.EngBEProject != "" {
@@ -46,10 +44,17 @@ func ScanGitLab(ctx context.Context, cfg Config, limit int) (Catalog, error) {
 	}
 
 	var jobsList []scanJob
-	for _, project := range cfg.Projects {
-		tags, err := client.ListTags(ctx, project)
+	for _, project := range projects {
+		if project.PathNamespace == "" {
+			continue
+		}
+		if cfg.ProjectRegex != nil && !cfg.ProjectRegex.MatchString(project.PathNamespace) {
+			continue
+		}
+
+		tags, err := client.ListTags(ctx, project.PathNamespace)
 		if err != nil {
-			listErrors = append(listErrors, ScanError{Project: project, Error: err.Error()})
+			listErrors = append(listErrors, ScanError{Project: project.PathNamespace, Error: err.Error()})
 			continue
 		}
 
@@ -59,8 +64,7 @@ func ScanGitLab(ctx context.Context, cfg Config, limit int) (Catalog, error) {
 				matching = append(matching, tag.Name)
 			}
 		}
-		// GitLab does not have to return semantic versions in semantic order.
-		// Sort locally so --limit means newest BM release versions.
+
 		sort.Slice(matching, func(i, j int) bool {
 			return versionLess(matching[j], matching[i])
 		})
@@ -68,7 +72,7 @@ func ScanGitLab(ctx context.Context, cfg Config, limit int) (Catalog, error) {
 			matching = matching[:limit]
 		}
 		for _, tag := range matching {
-			jobsList = append(jobsList, scanJob{Project: project, Tag: tag})
+			jobsList = append(jobsList, scanJob{Project: project.PathNamespace, Tag: tag})
 		}
 	}
 
