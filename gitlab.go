@@ -13,9 +13,10 @@ import (
 )
 
 type GitLabClient struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	baseURL    string
+	token      string
+	authHeader string
+	client     *http.Client
 }
 
 type GitLabTag struct {
@@ -30,9 +31,18 @@ type GitLabProject struct {
 
 func NewGitLabClient(baseURL, token string, timeout time.Duration) *GitLabClient {
 	return &GitLabClient{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		token:   token,
-		client:  &http.Client{Timeout: timeout},
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		token:      token,
+		authHeader: "PRIVATE-TOKEN",
+		client:     &http.Client{Timeout: timeout},
+	}
+}
+
+// SetAuthHeader selects the GitLab authentication header. It defaults to
+// PRIVATE-TOKEN; use JOB-TOKEN to authenticate with CI_JOB_TOKEN.
+func (c *GitLabClient) SetAuthHeader(header string) {
+	if header != "" {
+		c.authHeader = header
 	}
 }
 
@@ -123,7 +133,7 @@ func (c *GitLabClient) do(ctx context.Context, method, endpoint string) (*http.R
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("PRIVATE-TOKEN", c.token)
+	req.Header.Set(c.authHeader, c.token)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.client.Do(req)

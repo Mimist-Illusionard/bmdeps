@@ -13,6 +13,7 @@ import (
 type Config struct {
 	GitLabURL     string
 	GitLabToken   string
+	AuthHeader    string
 	GroupID       string
 	ProjectRegex  *regexp.Regexp
 	EngBEProject  string
@@ -41,6 +42,7 @@ func LoadConfig(path string) (Config, error) {
 	cfg := Config{
 		GitLabURL:     strings.TrimRight(get("GITLAB_URL", ""), "/"),
 		GitLabToken:   get("GITLAB_TOKEN", ""),
+		AuthHeader:    strings.ToUpper(strings.TrimSpace(get("GITLAB_AUTH_HEADER", "PRIVATE-TOKEN"))),
 		GroupID:       strings.TrimSpace(get("GROUP_ID", "")),
 		EngBEProject:  strings.TrimSpace(get("ENGBE_PROJECT", "")),
 		DataModelPath: strings.Trim(get("DATA_MODEL_PATH", "dataModel"), "/"),
@@ -53,6 +55,11 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if cfg.GitLabToken == "" {
 		return Config{}, fmt.Errorf("GITLAB_TOKEN is required")
+	}
+	switch cfg.AuthHeader {
+	case "PRIVATE-TOKEN", "JOB-TOKEN":
+	default:
+		return Config{}, fmt.Errorf("GITLAB_AUTH_HEADER must be PRIVATE-TOKEN or JOB-TOKEN")
 	}
 	if cfg.GroupID == "" {
 		return Config{}, fmt.Errorf("GROUP_ID is required")

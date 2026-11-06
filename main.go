@@ -57,6 +57,7 @@ func runScan(args []string) error {
 	}
 
 	client := NewGitLabClient(cfg.GitLabURL, cfg.GitLabToken, cfg.HTTPTimeout)
+	client.SetAuthHeader(cfg.AuthHeader)
 	projects, err := client.ListProjects(context.Background(), cfg.GroupID)
 	if err != nil {
 		return err

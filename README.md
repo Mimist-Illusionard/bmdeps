@@ -161,6 +161,7 @@ Available configuration parameters:
 |---|---|---|
 | `GITLAB_URL` | GitLab base URL without `/api/v4` | required |
 | `GITLAB_TOKEN` | GitLab token used to read tags and repository files | required |
+| `GITLAB_AUTH_HEADER` | authentication header: `PRIVATE-TOKEN` or `JOB-TOKEN` | `PRIVATE-TOKEN` |
 | `PROJECTS` | comma-separated list of BM GitLab projects | required |
 | `GROUP_ID` | GitLab group whose projects are scanned; subgroups are included | required |
 | `PROJECT_REGEX` | optional regexp matched against the full project path, e.g. `^CS-BM/` | empty (all projects) |
@@ -322,6 +323,88 @@ A different prefix can be supplied with `--prefix`:
   --pom ./stand_pom.xml \
   --prefix cs-
 ```
+
+## CI/CD
+
+The Linux binary is always built **locally**; nothing is compiled on the runner.
+Two modes are supported.
+
+### Mode A: offline check (no token, no CI/CD variables)
+
+Use this when CI/CD variables are not available. Build the binary and the
+catalog locally, then commit both to the stand project:
+
+```powershell
+New-Item -ItemType Directory -Force tools | Out-Null
+$env:CGO_ENABLED = "0"; $env:GOOS = "linux"; $env:GOARCH = "amd64"
+go build -trimpath -ldflags="-s -w" -o tools/bmdeps-linux-amd64 .
+Remove-Item Env:CGO_ENABLED,Env:GOOS,Env:GOARCH
+
+./bmdeps.exe scan --env ./bmdeps.env --out ./tools
+```
+
+Commit:
+
+```text
+tools/bmdeps-linux-amd64
+tools/catalog.json
+```
+
+`.gitattributes` marks the binary as `binary`, so Git never converts its line
+endings. Re-run `scan` and commit `tools/catalog.json` when new BM releases must
+be checked.
+
+Add a `check` stage before `dockers` and copy `ci/bmdeps-check.yml`:
+
+```yaml
+stages:
+  - check
+  - dockers
+```
+
+The job runs only:
+
+```text
+bmdeps check --catalog tools/catalog.json --pom pom.xml --report bmdeps-report.json
+```
+
+An incompatible stand exits with code `2`, the pipeline fails, and the manual
+`dockers` jobs cannot be started.
+
+### Mode B: scan on the runner (needs a token)
+
+Add a **masked** CI/CD variable `BMDDEPS_TOKEN` at the **project** level
+(Settings → CI/CD → Variables) or group level. Disable **Protected** if the
+`preprod*` branches are not protected. The token should be a group access token
+with `read_api` and `Reporter` access to the BM group.
+
+The job then runs:
+
+```text
+bmdeps scan --env bmdeps.env --out out
+bmdeps check --catalog out/catalog.json --pom pom.xml --report bmdeps-report.json
+```
+
+In this mode do not commit `tools/catalog.json`.
+
+Scanning every tag of every project can take a while. Add `--limit <n>` to
+`scan` to scan only the newest `n` tags per project, but make sure the versions
+used by the stand are covered.
+
+`CI_JOB_TOKEN` is available automatically, but it is scoped to the job's project
+plus explicitly allowlisted projects. It usually cannot list a whole group, so
+`scan` may fail with `401`/`403`/`404`. To try it, configure job token
+permissions for the BM group and set:
+
+```yaml
+  variables:
+    GITLAB_AUTH_HEADER: "JOB-TOKEN"
+  before_script:
+    - 'export GITLAB_TOKEN="$CI_JOB_TOKEN"'
+```
+
+`GITLAB_AUTH_HEADER` selects the header name; with a normal access token keep
+the default `PRIVATE-TOKEN`.
 
 ## Available flags
 
