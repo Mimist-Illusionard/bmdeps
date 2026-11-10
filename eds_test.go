@@ -34,6 +34,20 @@ run '3710/install.eds'
 	}
 }
 
+func TestVersionedNestedInstaller(t *testing.T) {
+	group := []byte(`
+warn 'Установка ultimatek 100'
+run '/version.100/install.eds'
+`)
+	got, ok := LatestNestedInstaller(group, "dataModel/version.100/install.eds")
+	if !ok {
+		t.Fatal("not found")
+	}
+	if got != "dataModel/version.100/version.100/install.eds" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestParseInstaller(t *testing.T) {
 	src := []byte(`
 start-trans

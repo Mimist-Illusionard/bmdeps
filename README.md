@@ -14,7 +14,7 @@ BM project `pom.xml` files are intentionally not used to determine compatibility
 - discovers BM releases from Git tags;
 - maps each BM release to its EDS DB version;
 - reads DB dependencies from `assert-dependency` declarations;
-- supports nested EDS installers such as `version.3700/3710/install.eds`;
+- supports nested EDS installers such as `version.3700/3710/install.eds` and `version.100/version.100/install.eds`;
 - builds a reusable JSON catalog of BM releases and DB requirements;
 - generates a Graphviz dependency graph;
 - reads BM versions selected in a stand `pom.xml`;

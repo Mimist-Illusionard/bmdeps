@@ -1,4 +1,5 @@
 bmdeps.env
+.env
 out/
 bmdeps
 bmdeps.exe

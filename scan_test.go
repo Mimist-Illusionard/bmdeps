@@ -60,3 +60,32 @@ func TestAnalyzeReleaseAddsEngBEFromBMPOM(t *testing.T) {
 		t.Fatalf("engbe=%q release=%+v", r.EngBEVersion, r)
 	}
 }
+
+func TestAnalyzeReleaseFollowsVersionedNestedInstaller(t *testing.T) {
+	files := fakeFiles{
+		"cs-bm/cs-ultimatek@v0.1.0:dataModel/install.eds": `
+run /version.100/install.eds
+run 'GLOBAL_SCRIPTS/install.eds'
+`,
+		"cs-bm/cs-ultimatek@v0.1.0:dataModel/version.100/install.eds": `
+warn 'Установка ultimatek 100'
+run '/version.100/install.eds'
+`,
+		"cs-bm/cs-ultimatek@v0.1.0:dataModel/version.100/version.100/install.eds": `
+assert-dependency should-be 4712 name "glo"
+assert-dependency should-be 2107 name "dms"
+assert-module-version should-be 100 module-name "ultc"
+`,
+	}
+
+	r, err := analyzeRelease(context.Background(), files, "dataModel", "cs-bm/cs-ultimatek", "v0.1.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Module != "ultc" || r.DBVersion != 100 {
+		t.Fatalf("bad release: %+v", r)
+	}
+	if r.InstallerPath != "dataModel/version.100/version.100/install.eds" {
+		t.Fatalf("installer=%q", r.InstallerPath)
+	}
+}

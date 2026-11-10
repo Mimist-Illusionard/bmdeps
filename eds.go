@@ -13,7 +13,7 @@ var (
 	dependencyRE    = regexp.MustCompile(`(?i)assert-dependency\s+should-be\s+([0-9]+)\s+name\s+["']([^"']+)["']`)
 	moduleVersionRE = regexp.MustCompile(`(?i)assert-module-version\s+should-be\s+([0-9]+)\s+module-name\s+["']([^"']+)["']`)
 	versionRunRE    = regexp.MustCompile(`(?i)^/?version\.([0-9]+)/install\.eds$`)
-	numericRunRE    = regexp.MustCompile(`(?i)^/?([0-9]+)/install\.eds$`)
+	numericRunRE    = regexp.MustCompile(`(?i)^/?((?:version\.)?[0-9]+)/install\.eds$`)
 )
 
 type DBDependency struct {
